@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
     });
     exe.root_module.addImport("win32", win32.module("zigwin32"));
+    exe.addWin32ResourceFile(.{ .file = b.path("res/resources.rc") });
     // exe.subsystem = .Windows;
 
     const run_exe = b.addRunArtifact(exe);

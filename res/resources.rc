@@ -1,0 +1,3 @@
+#define ICO_ID 1
+
+ICO_ID ICON "zig-logo.ico"

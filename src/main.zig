@@ -1,6 +1,7 @@
 const icon_uid: u32 = 69;
 
 const WindowState = struct {
+    hinst: win32.HINSTANCE,
     shown: bool = true,
 };
 
@@ -20,6 +21,7 @@ pub export fn wWinMain(
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = class_name;
+    wc.hIcon = win32.LoadIconA(hInstance, @ptrFromInt(1));
 
     const class_atom = win32.RegisterClassA(&wc);
     if (class_atom == 0) {
@@ -32,7 +34,9 @@ pub export fn wWinMain(
         class_atom,
     });
 
-    var window_state: WindowState = .{};
+    var window_state: WindowState = .{
+        .hinst = hInstance,
+    };
 
     const window = if (win32.CreateWindowExA(
         .{},
@@ -69,7 +73,7 @@ pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win
     if (uMsg == win32.WM_CREATE) {
         if (lParam > 0) {
             const p: *win32.CREATESTRUCTA = @ptrFromInt(@as(usize, @bitCast(lParam)));
-            window_state = @ptrCast(p.lpCreateParams);
+            window_state = @ptrCast(@alignCast(p.lpCreateParams));
         }
         _ = win32.SetWindowLongPtrA(hwnd, win32.GWLP_USERDATA, @bitCast(@intFromPtr(window_state)));
     }
@@ -87,10 +91,15 @@ pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win
             icon.uID = icon_uid;
             icon.uCallbackMessage = icon_uid;
             icon.uFlags = .{
-                .TIP = 1,
+                .ICON = 1,
                 .MESSAGE = 1,
+                .TIP = 1,
             };
             _ = std.fmt.bufPrintZ(&icon.szTip, "Zig Icon", .{}) catch @panic("OOM");
+
+            if (window_state) |w| {
+                icon.hIcon = win32.LoadIconA(w.hinst, @ptrFromInt(1));
+            }
 
             if (win32.Shell_NotifyIconA(win32.NIM_ADD, &icon) == 0) {
                 logLastErr("failed to create icon");
