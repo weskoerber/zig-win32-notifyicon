@@ -1,36 +1,7 @@
 const icon_uid: u32 = 69;
 
 const WindowState = struct {
-    var shown: struct {
-        mutex: std.Thread.Mutex = .{},
-        value: bool = true,
-    } = .{};
-
-    pub fn isShown() bool {
-        shown.mutex.lock();
-        const is_shown = shown.value;
-        shown.mutex.unlock();
-
-        return is_shown;
-    }
-
-    pub fn show() void {
-        shown.mutex.lock();
-        shown.value = true;
-        shown.mutex.unlock();
-    }
-
-    pub fn hide() void {
-        shown.mutex.lock();
-        shown.value = false;
-        shown.mutex.unlock();
-    }
-
-    pub fn toggle() void {
-        shown.mutex.lock();
-        shown.value = !shown.value;
-        shown.mutex.unlock();
-    }
+    shown: bool = true,
 };
 
 pub export fn wWinMain(
@@ -61,6 +32,8 @@ pub export fn wWinMain(
         class_atom,
     });
 
+    var window_state: WindowState = .{};
+
     const window = if (win32.CreateWindowExA(
         .{},
         class_name,
@@ -73,13 +46,13 @@ pub export fn wWinMain(
         null,
         null,
         hInstance,
-        null,
+        &window_state,
     )) |h| h else {
         logLastErr("failed to create window");
         return 1;
     };
 
-    _ = win32.ShowWindow(window, .{ .SHOWNORMAL = @intFromBool(WindowState.isShown()) });
+    _ = win32.ShowWindow(window, .{ .SHOWNORMAL = @intFromBool(window_state.shown) });
 
     var msg = std.mem.zeroes(win32.MSG);
     while (win32.GetMessageA(&msg, null, 0, 0) > 0) {
@@ -91,6 +64,21 @@ pub export fn wWinMain(
 }
 
 pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win32.LPARAM) isize {
+    var window_state: ?*WindowState = null;
+
+    if (uMsg == win32.WM_CREATE) {
+        if (lParam > 0) {
+            const p: *win32.CREATESTRUCTA = @ptrFromInt(@as(usize, @bitCast(lParam)));
+            window_state = @ptrCast(p.lpCreateParams);
+        }
+        _ = win32.SetWindowLongPtrA(hwnd, win32.GWLP_USERDATA, @bitCast(@intFromPtr(window_state)));
+    }
+
+    const r: usize = @bitCast(win32.GetWindowLongPtrA(hwnd, win32.GWLP_USERDATA));
+    if (r > 0) {
+        window_state = @ptrFromInt(r);
+    }
+
     switch (uMsg) {
         win32.WM_CREATE => {
             var icon = std.mem.zeroes(win32.NOTIFYICONDATAA);
@@ -141,8 +129,10 @@ pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win
 
             switch (icon_event) {
                 win32.NIN_SELECT => {
-                    WindowState.toggle();
-                    _ = win32.ShowWindow(hwnd, .{ .SHOWNORMAL = @intFromBool(WindowState.isShown()) });
+                    if (window_state) |w| {
+                        w.shown = !w.shown;
+                        _ = win32.ShowWindow(hwnd, .{ .SHOWNORMAL = @intFromBool(w.shown) });
+                    }
                 },
                 else => {},
             }
