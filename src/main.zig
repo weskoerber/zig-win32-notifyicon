@@ -4,6 +4,13 @@ const WindowState = struct {
     shown: bool = true,
 };
 
+// Keep this in sync with res/resources.h
+const Resources = struct {
+    pub const ICO_ZIG = 1;
+    pub const MENU_TRAY = 2;
+    pub const MENU_TRAY_POPUP = 3;
+};
+
 pub export fn wWinMain(
     hInstance: win32.HINSTANCE,
     hPrevInstance: ?win32.HINSTANCE,
@@ -20,7 +27,7 @@ pub export fn wWinMain(
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = class_name;
-    wc.hIcon = win32.LoadIconA(hInstance, @ptrFromInt(1)) orelse panicWithLastErr("failed to load window class icon resource {d}", .{1});
+    wc.hIcon = win32.LoadIconA(hInstance, @ptrFromInt(Resources.ICO_ZIG)) orelse panicWithLastErr("failed to load window class icon resource {d}", .{Resources.ICO_ZIG});
 
     if (win32.RegisterClassA(&wc) == 0) {
         panicWithLastErr("failed to register window class {s}", .{class_name});
@@ -57,12 +64,14 @@ pub export fn wWinMain(
 pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win32.LPARAM) isize {
     var window_state: ?*WindowState = null;
     var hinst: ?win32.HINSTANCE = null;
+    var window_name: ?[*:0]const u8 = null;
 
     if (uMsg == win32.WM_CREATE) {
         if (lParam > 0) {
             const p: *win32.CREATESTRUCTA = @ptrFromInt(@as(usize, @bitCast(lParam)));
-            hinst = p.hInstance;
             window_state = @ptrCast(@alignCast(p.lpCreateParams));
+            hinst = p.hInstance;
+            window_name = p.lpszName;
 
             const new_long = @intFromPtr(window_state);
             if (win32.SetWindowLongPtrA(hwnd, win32.GWLP_USERDATA, @bitCast(new_long)) == 0) {
@@ -102,7 +111,7 @@ pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win
             };
             _ = std.fmt.bufPrintZ(&icon.szTip, "Zig Icon", .{}) catch @panic("OOM");
 
-            icon.hIcon = win32.LoadIconA(hinst, @ptrFromInt(1)) orelse panicWithLastErr("failed to load notify icon icon resource {d}", .{1});
+            icon.hIcon = win32.LoadIconA(hinst, @ptrFromInt(Resources.ICO_ZIG)) orelse panicWithLastErr("failed to load notify icon icon resource {d}", .{Resources.ICO_ZIG});
 
             if (win32.Shell_NotifyIconA(win32.NIM_ADD, &icon) == 0) {
                 panicWithLastErr("failed to create notify icon", .{});
@@ -145,11 +154,13 @@ pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win
                     _ = win32.ShowWindow(hwnd, .{ .SHOWNORMAL = @intFromBool(window_state.?.shown) });
                 },
                 win32.WM_CONTEXTMENU => {
-                    const hmenu = win32.LoadMenuA(hinst, @ptrFromInt(2)) orelse panicWithLastErr("failed to load notify icon menu resource {d}", .{2});
-                    const hsubmenu = win32.GetSubMenu(hmenu, 0) orelse panicWithLastErr("failed to load notify icon menu {d} submenu", .{2});
+                    const hmenu = win32.LoadMenuA(hinst, @ptrFromInt(Resources.MENU_TRAY)) orelse panicWithLastErr("failed to load notify icon menu resource {d}", .{Resources.MENU_TRAY});
+                    const hsubmenu = win32.GetSubMenu(hmenu, 0) orelse panicWithLastErr("failed to load notify icon menu {d} submenu", .{Resources.MENU_TRAY});
                     const cmd = win32.TrackPopupMenu(hsubmenu, .{ .BOTTOMALIGN = 1, .RETURNCMD = 1 }, x, y, 0, hwnd, null);
                     switch (cmd) {
-                        3 => std.debug.print("All your codebase are belong to us!\n", .{}),
+                        3 => {
+                            _ = win32.MessageBoxA(hwnd, "All your codebase are belong to us!", window_name orelse "Zig Window", win32.MB_ICONEXCLAMATION);
+                        },
                         else => std.log.err("unhandled menu selection {d} for menu {d}", .{ cmd, 2 }),
                     }
 

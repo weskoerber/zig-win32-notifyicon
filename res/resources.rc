@@ -1,13 +1,11 @@
-#define ICO_ID 1
-#define MENU_ID 2
-#define MI_AYC 3
+#include "./resources.h"
 
-ICO_ID ICON "zig-logo.ico"
+RES_ICO_ZIG ICON "zig-logo.ico"
 
-MENU_ID MENU
+RES_MENU_TRAY MENU
 BEGIN
     POPUP "ContextMenu"
     BEGIN
-        MENUITEM "AYCABTU", MI_AYC
+        MENUITEM "AYCABTU", RES_MENU_TRAY_POPUP
     END
 END
