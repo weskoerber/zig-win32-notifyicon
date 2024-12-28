@@ -128,22 +128,45 @@ pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win
             _ = win32.EndPaint(hwnd, &ps);
         },
         icon_uid => {
+            const x: u16 = @truncate(wParam);
+            const y: u16 = @truncate(wParam >> 16);
+
             const icon_event: i16 = @truncate(lParam);
-            // const icon_id: i16 = @truncate(lParam >> 16);
-            // std.debug.print("icon_id: {d}\nicon_event: {d}\n", .{ icon_id, icon_event });
-
-            // const x: u16 = @truncate(wParam);
-            // const y: u16 = @truncate(wParam >> 16);
-            // std.debug.print("x: {d}\ny: {d}\n", .{ x, y });
-
             switch (icon_event) {
                 win32.NIN_SELECT => {
+                    std.debug.print("x: {d}\ny: {d}\n", .{ x, y });
                     if (window_state) |w| {
                         w.shown = !w.shown;
                         _ = win32.ShowWindow(hwnd, .{ .SHOWNORMAL = @intFromBool(w.shown) });
                     }
                 },
-                else => {},
+                win32.WM_CONTEXTMENU => {
+                    const hmenu = win32.CreatePopupMenu();
+                    if (hmenu == null) {
+                        logLastErr("CreatePopupMenu failed");
+                    }
+                    var item = std.mem.zeroes(win32.MENUITEMINFOA);
+                    item.cbSize = @sizeOf(win32.MENUITEMINFOA);
+                    item.fType = win32.MFT_STRING;
+                    item.fMask = win32.MIIM_STRING;
+                    const item_str = "AYCABTU";
+                    item.dwTypeData = @constCast(item_str.ptr);
+
+                    if (win32.InsertMenuItemA(hmenu, 0, 1, &item) == 0) {
+                        logLastErr("InsertMenuItem failed");
+                    }
+
+                    const cmd = win32.TrackPopupMenu(hmenu, .{ .BOTTOMALIGN = 1, .RETURNCMD = 1 }, x, y, 0, hwnd, null);
+                    switch (cmd) {
+                        0 => std.debug.print("All your codebase are belong to us!\n", .{}),
+                        else => {},
+                    }
+                },
+                win32.WM_MOUSEMOVE => {},
+                else => {
+                    // const icon_id: i16 = @truncate(lParam >> 16);
+                    std.debug.print("icon_event: {d}\n", .{icon_event});
+                },
             }
         },
         // else => std.log.warn("unhandled message: {d}", .{uMsg}),
