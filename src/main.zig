@@ -156,7 +156,17 @@ pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win
                 win32.WM_CONTEXTMENU => {
                     const hmenu = win32.LoadMenuA(hinst, @ptrFromInt(Resources.MENU_TRAY)) orelse panicWithLastErr("failed to load notify icon menu resource {d}", .{Resources.MENU_TRAY});
                     const hsubmenu = win32.GetSubMenu(hmenu, 0) orelse panicWithLastErr("failed to load notify icon menu {d} submenu", .{Resources.MENU_TRAY});
+
+                    if (win32.SetForegroundWindow(hwnd) == 0) {
+                        panicWithLastErr("failed to set foreground window while configuring tray icon menu", .{});
+                    }
+
                     const cmd = win32.TrackPopupMenu(hsubmenu, .{ .BOTTOMALIGN = 1, .RETURNCMD = 1 }, x, y, 0, hwnd, null);
+
+                    if (win32.PostMessageA(hwnd, win32.WM_NULL, 0, 0) == 0) {
+                        panicWithLastErr("failed to post null message after tracking popup menu", .{});
+                    }
+
                     switch (cmd) {
                         3 => {
                             _ = win32.MessageBoxA(hwnd, "All your codebase are belong to us!", window_name orelse "Zig Window", win32.MB_ICONEXCLAMATION);
