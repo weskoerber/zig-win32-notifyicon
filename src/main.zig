@@ -1,7 +1,6 @@
 const icon_uid: u32 = 69;
 
 const WindowState = struct {
-    hinst: win32.HINSTANCE,
     shown: bool = true,
 };
 
@@ -21,22 +20,13 @@ pub export fn wWinMain(
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = class_name;
-    wc.hIcon = win32.LoadIconA(hInstance, @ptrFromInt(1));
+    wc.hIcon = win32.LoadIconA(hInstance, @ptrFromInt(1)) orelse panicWithLastErr("failed to load window class icon resource {d}", .{1});
 
-    const class_atom = win32.RegisterClassA(&wc);
-    if (class_atom == 0) {
-        logLastErr("failed to register class");
-        return 1;
+    if (win32.RegisterClassA(&wc) == 0) {
+        panicWithLastErr("failed to register window class {s}", .{class_name});
     }
 
-    std.log.debug("sucessfully registered class name {s}: {d}", .{
-        class_name,
-        class_atom,
-    });
-
-    var window_state: WindowState = .{
-        .hinst = hInstance,
-    };
+    var window_state: WindowState = .{};
 
     const window = if (win32.CreateWindowExA(
         .{},
@@ -51,10 +41,7 @@ pub export fn wWinMain(
         null,
         hInstance,
         &window_state,
-    )) |h| h else {
-        logLastErr("failed to create window");
-        return 1;
-    };
+    )) |h| h else panicWithLastErr("failed to create window", .{});
 
     _ = win32.ShowWindow(window, .{ .SHOWNORMAL = @intFromBool(window_state.shown) });
 
@@ -69,19 +56,37 @@ pub export fn wWinMain(
 
 pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win32.LPARAM) isize {
     var window_state: ?*WindowState = null;
+    var hinst: ?win32.HINSTANCE = null;
 
     if (uMsg == win32.WM_CREATE) {
         if (lParam > 0) {
             const p: *win32.CREATESTRUCTA = @ptrFromInt(@as(usize, @bitCast(lParam)));
+            hinst = p.hInstance;
             window_state = @ptrCast(@alignCast(p.lpCreateParams));
+
+            const new_long = @intFromPtr(window_state);
+            if (win32.SetWindowLongPtrA(hwnd, win32.GWLP_USERDATA, @bitCast(new_long)) == 0) {
+                if (win32.GetLastError() != .NO_ERROR) {
+                    panicWithLastErr("failed to get window state", .{});
+                }
+            }
+
+            std.log.debug("set window state", .{});
         }
-        _ = win32.SetWindowLongPtrA(hwnd, win32.GWLP_USERDATA, @bitCast(@intFromPtr(window_state)));
     }
 
-    const r: usize = @bitCast(win32.GetWindowLongPtrA(hwnd, win32.GWLP_USERDATA));
-    if (r > 0) {
-        window_state = @ptrFromInt(r);
-    }
+    window_state = switch (win32.GetWindowLongPtrA(hwnd, win32.GWLP_USERDATA)) {
+        // WM_CREATE may not yet have been fired, so SetWindowLongPtr might not
+        // have been called yet!
+        0 => blk: {
+            if (win32.GetLastError() != .NO_ERROR) {
+                panicWithLastErr("failed to get window state", .{});
+            }
+
+            break :blk null;
+        },
+        else => |val| @ptrFromInt(@as(usize, @bitCast(val))),
+    };
 
     switch (uMsg) {
         win32.WM_CREATE => {
@@ -97,32 +102,33 @@ pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win
             };
             _ = std.fmt.bufPrintZ(&icon.szTip, "Zig Icon", .{}) catch @panic("OOM");
 
-            if (window_state) |w| {
-                icon.hIcon = win32.LoadIconA(w.hinst, @ptrFromInt(1));
-            }
+            icon.hIcon = win32.LoadIconA(hinst, @ptrFromInt(1)) orelse panicWithLastErr("failed to load notify icon icon resource {d}", .{1});
 
             if (win32.Shell_NotifyIconA(win32.NIM_ADD, &icon) == 0) {
-                logLastErr("failed to create icon");
-                return -1;
+                panicWithLastErr("failed to create notify icon", .{});
             }
 
             icon.Anonymous.uVersion = win32.NOTIFYICON_VERSION_4;
             if (win32.Shell_NotifyIconA(win32.NIM_SETVERSION, &icon) == 0) {
-                logLastErr("failed to create icon");
-                return -1;
+                panicWithLastErr("failed to set notify icon version", .{});
             }
         },
         win32.WM_DESTROY => {
             var icon = std.mem.zeroes(win32.NOTIFYICONDATAA);
             icon.uID = icon_uid;
-            _ = win32.Shell_NotifyIconA(win32.NIM_DELETE, &icon);
+            icon.hWnd = hwnd;
+            if (win32.Shell_NotifyIconA(win32.NIM_DELETE, &icon) == 0) {
+                panicWithLastErr("failed to delete notify icon", .{});
+            }
             win32.PostQuitMessage(0);
         },
         win32.WM_PAINT => {
             var ps = std.mem.zeroes(win32.PAINTSTRUCT);
-            const hdc = win32.BeginPaint(hwnd, &ps);
+            const hdc = win32.BeginPaint(hwnd, &ps) orelse panicWithLastErr("BeginPaint failed", .{});
+            const brush_idx = @intFromEnum(win32.COLOR_WINDOW) + 1;
+            const hbrush = win32.GetSysColorBrush(brush_idx) orelse panicWithLastErr("failed to get color brush {d}", .{brush_idx});
 
-            if (win32.FillRect(hdc, &ps.rcPaint, win32.GetSysColorBrush(@intFromEnum(win32.COLOR_WINDOW) + 1)) == 0) {
+            if (win32.FillRect(hdc, &ps.rcPaint, hbrush) == 0) {
                 logLastErr("FillRect failed");
             }
             _ = win32.EndPaint(hwnd, &ps);
@@ -135,31 +141,20 @@ pub export fn WindowProc(hwnd: win32.HWND, uMsg: u32, wParam: usize, lParam: win
             switch (icon_event) {
                 win32.NIN_SELECT => {
                     std.debug.print("x: {d}\ny: {d}\n", .{ x, y });
-                    if (window_state) |w| {
-                        w.shown = !w.shown;
-                        _ = win32.ShowWindow(hwnd, .{ .SHOWNORMAL = @intFromBool(w.shown) });
-                    }
+                    window_state.?.shown = !window_state.?.shown;
+                    _ = win32.ShowWindow(hwnd, .{ .SHOWNORMAL = @intFromBool(window_state.?.shown) });
                 },
                 win32.WM_CONTEXTMENU => {
-                    const hmenu = win32.CreatePopupMenu();
-                    if (hmenu == null) {
-                        logLastErr("CreatePopupMenu failed");
-                    }
-                    var item = std.mem.zeroes(win32.MENUITEMINFOA);
-                    item.cbSize = @sizeOf(win32.MENUITEMINFOA);
-                    item.fType = win32.MFT_STRING;
-                    item.fMask = win32.MIIM_STRING;
-                    const item_str = "AYCABTU";
-                    item.dwTypeData = @constCast(item_str.ptr);
-
-                    if (win32.InsertMenuItemA(hmenu, 0, 1, &item) == 0) {
-                        logLastErr("InsertMenuItem failed");
-                    }
-
-                    const cmd = win32.TrackPopupMenu(hmenu, .{ .BOTTOMALIGN = 1, .RETURNCMD = 1 }, x, y, 0, hwnd, null);
+                    const hmenu = win32.LoadMenuA(hinst, @ptrFromInt(2)) orelse panicWithLastErr("failed to load notify icon menu resource {d}", .{2});
+                    const hsubmenu = win32.GetSubMenu(hmenu, 0) orelse panicWithLastErr("failed to load notify icon menu {d} submenu", .{2});
+                    const cmd = win32.TrackPopupMenu(hsubmenu, .{ .BOTTOMALIGN = 1, .RETURNCMD = 1 }, x, y, 0, hwnd, null);
                     switch (cmd) {
-                        0 => std.debug.print("All your codebase are belong to us!\n", .{}),
-                        else => {},
+                        3 => std.debug.print("All your codebase are belong to us!\n", .{}),
+                        else => std.log.err("unhandled menu selection {d} for menu {d}", .{ cmd, 2 }),
+                    }
+
+                    if (win32.DestroyMenu(hmenu) == 0) {
+                        panicWithLastErr("failed to destroy notify icon menu", .{});
                     }
                 },
                 win32.WM_MOUSEMOVE => {},
@@ -184,6 +179,34 @@ fn logLastErr(msg: []const u8) void {
     std.log.err("{s}", .{str});
 
     _ = win32.MessageBoxA(null, str.ptr, "GetLastError", .{});
+}
+
+fn panicWithLastErr(comptime fmt: []const u8, args: anytype) noreturn {
+    @branchHint(.cold);
+
+    const err = win32.GetLastError();
+    const err_num = @intFromEnum(err);
+
+    var win32_buf: [1024]u8 = undefined;
+    const win32_msg_len = switch (win32.FormatMessageA(
+        .{ .IGNORE_INSERTS = 1, .FROM_SYSTEM = 1 },
+        null,
+        err_num,
+        0,
+        @ptrCast(&win32_buf),
+        win32_buf.len,
+        null,
+    )) {
+        0 => panicWithLastErr("failed to format last message string", .{}),
+        else => |len| len,
+    };
+
+    std.log.err("win32 error: {s}", .{win32_buf[0..win32_msg_len]});
+
+    var buf: [1024:0]u8 = undefined;
+    const panic_str = std.fmt.bufPrint(&buf, fmt, args) catch @panic("panic_str buffer too small");
+
+    @panic(panic_str);
 }
 
 const std = @import("std");

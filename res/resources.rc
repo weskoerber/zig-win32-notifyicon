@@ -1,3 +1,13 @@
 #define ICO_ID 1
+#define MENU_ID 2
+#define MI_AYC 3
 
 ICO_ID ICON "zig-logo.ico"
+
+MENU_ID MENU
+BEGIN
+    POPUP "ContextMenu"
+    BEGIN
+        MENUITEM "AYCABTU", MI_AYC
+    END
+END
